@@ -1,0 +1,666 @@
+---
+title: "Visualization of Movement Data"
+---
+
+#### By David Landis
+
+This website is to provide users with example codes on how to visualize flight patterns. The codes provided were adapted from the Animove website. To learn more about Animove click [here](https://animove.org) to visit their webpage. For any question about the codes provided please email the website creator David Landis at delandis\@cpp.edu.![](images/IMG_2638.JPG){width="688"}
+
+## What is in this Document
+
+-   Initial Setup
+    -   Load Packages
+    -   Set Working Directory and Upload Documents
+    -   Convert to POSIXct
+    -   Filter Data
+    -   Categorizing Migration Patterns
+    -   Convert to move
+-   Initial Map Visualization
+    -   Plot coordinates
+    -   Plot with Base Maps
+-   First Time Passage (FPT)
+    -   FPT with increasing Radii
+    -   FPT in Relation to Time
+-   Circular Visuals
+    -   Creating Azimuth
+    -   Direction of Travel
+    -   Speed in Relation to Direction
+    -   Detailed Migration Map
+-   Work With Altitude
+    -   Mutate Data to Fit Elevatr
+
+    -   Download elevatr data
+
+    -   Calculate Elevation Above Ground Level
+
+    -   Apply Filters
+
+    -   Create ggplot Visuals
+
+## Initial Set Up
+
+### Load Packages
+
+Click on the following packages to learn more about their functions.
+
+-   [*move*](https://cran.r-project.org/web/packages/move/move.pdf)
+-   [*scales*](https://cran.r-project.org/web/packages/scales/scales.pdf)
+-   [*sf*](https://cran.r-project.org/web/packages/sf/sf.pdf)
+-   [*tidyverse*](https://www.tidyverse.org)
+-   [*lubridate*](https://lubridate.tidyverse.org)
+-   [*mapdata*](https://cran.r-project.org/web/packages/mapdata/mapdata.pdf)
+-   [*adehabitatLT*](https://cran.r-project.org/web/packages/adehabitatLT/adehabitatLT.pdf)
+-   [*moveVis*](https://movevis.org/)
+-   [*SDLfilter*](https://cran.r-project.org/web/packages/SDLfilter/SDLfilter.pdf)
+
+```{r}
+library(move)
+library(scales)
+library(sf)
+library(tidyverse)
+library(lubridate)
+library(mapdata)
+library(adehabitatLT)
+library(moveVis)
+library(SDLfilter)
+library(elevatr)
+```
+
+### Set Working Directory and Read in Data
+
+-   Working directories are needed to be able to open data files that are in a different folder from your code.
+
+```{r}
+#set Working Directory
+setwd("/Users/davidlandis/Desktop/School/Data")
+
+#read in data
+tuvu_7783 <- read.csv("3.29.21-3.31.21_7783.csv")
+
+#remove unwanted columns from table
+tuvu_7783<-tuvu_7783[,-17]
+tuvu_7783<-tuvu_7783[,-18]
+```
+
+### Convert to POSIXct
+
+-   all the packages we will be working with require that time be presented in a POSIXct format.
+
+```{r}
+#Convert to POSIXct
+tuvu_7783$GPS_YYYY.MM.DD_HH.MM.SS <- as.POSIXct(tuvu_7783$GPS_YYYY.MM.DD_HH.MM.SS, 
+                                                tz = "UTC",
+                                                format = "%Y-%m-%d %H:%M:%OS")
+```
+
+### Filter Data by Speed
+
+-   GPS tracking devices are not perfect and occasionally obtain inaccurate data.
+
+-   We use a speed/velocity filter to remove biologically implausible data
+
+-   Additionally GPS locators will occasionally upload points that are located at 0 lat and 0 long. we will also filter to remove those points.
+
+```{r}
+#rename columns for SDL filter to be able to read them
+tuvu_7783<-tuvu_7783 |> 
+  rename(qi=fix, 
+         DateTime=GPS_YYYY.MM.DD_HH.MM.SS, 
+         id=serial) |> 
+  ddfilter(vmax = 50, 
+           vmaxlp = 30, 
+           qi = 3, 
+           ia = 90, 
+           method = 1) |> 
+  mutate(lat = na_if(lat, 0))
+
+#remove rows with NA from our data set
+tuvu_7783<-na.omit(tuvu_7783)
+```
+
+### Categorizing Migration patterns
+
+-   To visualize our birds trends during different seasons we need to categorize the data by months.
+
+```{r}
+#convert days to julian for better categorization 
+tuvu_7783$julian <- yday(tuvu_7783$DateTime)               
+
+#the seasons have been manually seperated by dates specific to tuvu_7783
+tuvu_7783$groups<-cut(tuvu_7783$julian, breaks = c(0,72,103,274,289,365), labels = c("Wintering", "North migration", "Breeding", "South Migration", "Wintering"))
+```
+
+### Convert to move
+
+-   To use the move package our data needs to be presented in a move format.
+
+```{r}
+#convert to Data.frame
+move_tuvu_7783<- methods::as(tuvu_7783, 
+                             "data.frame")
+
+#convert to move
+move_tuvu_7783 <- df2move(move_tuvu_7783, 
+                          proj = "+proj=longlat +datum=WGS84 +no_defs", 
+                          time = "DateTime", 
+                          x = "lon", 
+                          y = "lat", 
+                          track_id = "id",
+                          data = NULL )
+```
+
+## Initial Visualizations
+
+### Plot coordinates
+
+-   Quick Initial visualization of data point to visualize any out liers.
+
+```{r}
+#Create an initial simple plot
+plot(move_tuvu_7783, 
+     main="TUVU_7783 Movement")
+plot(move_tuvu_7783, 
+     main="TUVU_7783 Movement",
+     xlab="Longitude", 
+     ylab="Latitude",
+     type="b",
+     pch=16, 
+     cex=0.5)
+```
+
+### Plot with Base Maps
+
+-   The data can be plotted with a base map to get a better grasp of location.
+
+```{r}
+#load packages needed
+library("ggmap")
+library("mapproj")
+
+#plot basic base map
+map('worldHires',
+    main="TUVU_7783 Movement",
+    xlim = move_tuvu_7783@bbox[1, ]+c(-5,5), 
+    ylim = move_tuvu_7783@bbox[2, ]+c(-5,5),
+    col="grey", fill=T)
+lines(move_tuvu_7783, 
+      col="firebrick", 
+      lwd=1.5)
+
+#change the magnification of the graph for better visualizaiton
+(e<-bbox(extent(move_tuvu_7783)*1.1))
+
+#create map
+map('worldHires', 
+    main="TUVU_7783 Movement",
+    xlim = e[1, ], 
+    ylim = e[2, ])
+lines(move_tuvu_7783, 
+      color="firebrick", 
+      lwd=1.5)
+
+#obtain map from online source
+m <- get_map(e, 
+             zoom=7, 
+             source="stamen",
+             maptype="terrain")
+# plot the map and add the locations separated by individual id
+ggmap(m)+
+geom_path(data=tuvu_7783, 
+          aes(x=lon, y=lat))+
+  ggtitle("TUVU_7783 Movement")
+```
+
+## First Time Passage
+
+### FTP with increasing radii
+
+-   This graph shows how many days it takes to leave a given area when the area is increasing in size.
+
+```{r}
+#convert to a projection
+prj_tuvu_7783 <- spTransform(move_tuvu_7783, center=T)
+
+prj_tuvu_7783 <- fpt(as(prj_tuvu_7783, "ltraj"), 
+                 radii=10^seq(3, 6, length.out=150),
+                 units="days")
+# calculate mean nb of days to leave each radii 
+meanFPT <- colMeans(prj_tuvu_7783[[1]], 
+                    na.rm=T)
+radiiFPT <- attributes(prj_tuvu_7783)$radii
+plot(meanFPT~radiiFPT,
+     main="TUVU_7783",
+     type="l", 
+     lwd=2, 
+     xlab="Radii in meters",
+     ylab="First passage time in days", log="xy")
+#as the radii increases in size, it takes the animal longer to leave the circle
+
+# variance of the log(FPT) #
+vars <- varlogfpt(prj_tuvu_7783, graph=F)
+plot(as.numeric(vars)~radiiFPT,
+     main="TUVU_7783",
+     type="l", 
+     lwd=1, 
+     lty=2, 
+     log="x", 
+     ylab="Variance of log first passage time", 
+     xlab="Radius in meters")
+
+```
+
+### FPT in Relation to Time
+
+-   First three graphs show how there are different slopes on the FPT vs Radii graph.
+
+-   The last graph shows how long it takes a bird to leave 4 different size radii over time.
+
+    -   The migration patterns can be seen in the largest radii.
+
+-   The following code is very fancy and complex please visit Animove website for more info.
+
+```{r}
+plot(log10(meanFPT)~log10(radiiFPT),
+     main="TUVU_7783",
+     type="l", 
+     lwd=2, 
+     xlab="Log radii in meters",
+     ylab="Log first passage time in days")
+lm1 <- lm(log10(meanFPT[1:which.min(vars[1:which.max(vars)])])~
+            log10(radiiFPT[1:which.min(vars[1:which.max(vars)])]))
+lm2 <- lm(log10(meanFPT[which.min(vars[1:which.max(vars)]):which.max(vars)])~
+            log10(radiiFPT[which.min(vars[1:which.max(vars)]):which.max(vars)]))
+abline(lm1, lty=2)
+abline(lm2, lty=3)
+text(4, 0.1, paste(signif(summary(lm1)$coefficients[2,1], 2), 
+                   "±", 
+                   signif(summary(lm1)$coefficients[2,2], 2)), pos=4, cex=0.75)
+text(4, 1, paste(signif(summary(lm2)$coefficients[2,1], 2), 
+                 "±", 
+                 signif(summary(lm2)$coefficients[2,2], 2)), pos=4, cex=0.75)
+
+
+# breaks in the trend of the variance of log(fpt) 
+plot(as.numeric(vars)~radiiFPT,
+     main="TUVU_7783",
+     type="l", lwd=1, lty=2, 
+     ylab="Variance of log first passage time", 
+     xlab="Radius in meters", log="x")
+breaks <- which(diff(floor(diff(as.numeric(vars))))==-1)+1
+abline(v=radiiFPT[breaks])
+
+# fitting LM to all changes in slope of variance of log(fpt) ##
+plot(log10(meanFPT)~log10(radiiFPT),
+     main="TUVU_7783",
+     type="n", lwd=4, xlab="Log radii in meters",
+     ylab="Log first passage time in days")
+
+lm1 <- lm(log10(meanFPT[1:breaks[1]])~log10(radiiFPT[1:breaks[1]]))
+lm2 <- lm(log10(meanFPT[breaks[1]:breaks[2]])~log10(radiiFPT[breaks[1]:breaks[2]]))
+lm3 <- lm(log10(meanFPT[breaks[2]:breaks[3]])~log10(radiiFPT[breaks[2]:breaks[3]]))
+lm4 <- lm(log10(meanFPT[breaks[3]:breaks[4]])~log10(radiiFPT[breaks[3]:breaks[4]]))
+lm5 <- lm(log10(meanFPT[breaks[4]:length(as.numeric(vars))])~log10(radiiFPT[breaks[4]:length(as.numeric(vars))]))
+
+abline(lm1, lty=2, lwd=1 + summary(lm1)$coefficient[2,1], col=alpha("black", 0.8))
+abline(lm2, lty=2, lwd=1 + summary(lm2)$coefficient[2,1], col=alpha("black", 0.8))
+abline(lm3, lty=2, lwd=1 + summary(lm3)$coefficient[2,1], col=alpha("black", 0.8))
+abline(lm4, lty=2, lwd=1 + summary(lm4)$coefficient[2,1], col=alpha("black", 0.8))
+abline(lm5, lty=2, lwd=1 + summary(lm5)$coefficient[2,1], col=alpha("black", 0.8))
+
+lines(log10(meanFPT)~log10(radiiFPT),type="l", lwd=4, col=alpha("grey40", 0.8))
+legend("bottomright",title="Radii (m)", lty=c(2,2,2,2,2), 
+       lwd=signif(c(1+summary(lm1)$coefficient[2,1],
+                    1+summary(lm2)$coefficient[2,1],
+                    1+summary(lm3)$coefficient[2,1],
+                    1+summary(lm4)$coefficient[2,1],
+                    1+summary(lm5)$coefficient[2,1]),2),
+       c(paste(c(1000, round(radiiFPT[breaks],0))[1:2], collapse=" - "),
+         paste(c(1000, round(radiiFPT[breaks],0))[2:3], collapse=" - "),
+         paste(c(1000, round(radiiFPT[breaks],0))[3:4], collapse=" - "),
+         paste(c(1000, round(radiiFPT[breaks],0))[4:5], collapse=" - "),
+         paste(c(round(radiiFPT[breaks],0)[4], 100000), collapse=" - ")),
+         bty="n", cex=0.75)
+
+# FPT at the 4 different scales
+par(mfrow=c(2,2))
+for(i in 4:1){
+  plot(prj_tuvu_7783[[1]][,breaks[i]]~ move_tuvu_7783@timestamps, 
+       type="n",
+       xlab="Time", 
+       ylab="FPT (days)",
+       main= paste("TUVU_7783 Radius", 
+       round(radiiFPT[breaks[i]],0), "meters"),
+       bty="n")
+  points(prj_tuvu_7783[[1]][,breaks[i]]~ move_tuvu_7783@timestamps, 
+         pch=16, 
+         col=alpha("grey", 0.1))
+  lines(prj_tuvu_7783[[1]][,breaks[i]]~ move_tuvu_7783@timestamps)}
+par(mfrow=c(1,1))
+```
+
+## Circular Visuals
+
+### Creating azimuth
+
+-   Azimuth is needed to create a circular visualization of the data.
+
+```{r}
+#Filter out days before 2022
+tuvu_7783_22<-filter(tuvu_7783, DateTime>'2022-01-01 00:00:00')
+
+#filter out days after 2022
+tuvu_7783_22<-filter(tuvu_7783_22, DateTime<'2023-01-01 00:00:00')
+
+#convert to Data.frame
+move_tuvu_7783_22<- methods::as(tuvu_7783_22, 
+                             "data.frame")
+
+#convert to move
+move_tuvu_7783_22 <- df2move(move_tuvu_7783_22, 
+                          proj = "+proj=longlat +datum=WGS84 +no_defs", 
+                          time = "DateTime", 
+                          x = "lon", 
+                          y = "lat", 
+                          track_id = "id",
+                          data = NULL )
+```
+
+```{r}
+library(circular)
+# store the information in a new data frame
+azimuth <- data.frame(D=angle(move_tuvu_7783_22),
+                      V=speed(move_tuvu_7783_22), 
+                      Season=tuvu_7783_22$groups[-1])
+# Define the direction as a circular
+azimuth$Dcirc<-as.circular(azimuth$D, 
+                 rotation="clock", 
+                 units="degrees", 
+                 type="angles", 
+                 modulo="asis", 
+                 zero=0, 
+                 template="geographic")
+# select segments above 2 m/s, we are only interested in segments when 7783 is moving.
+azimuth <- azimuth[azimuth$V>=2,]
+# remove missing values
+azimuth <- azimuth[complete.cases(azimuth),]
+# define a vector that is used to set the order of plotting
+seasons <- levels(tuvu_7783_22$groups)
+```
+
+### Direction of Travel
+
+-   It can be seen that 7783 moves north during northern migration and south during southern migration.
+
+```{r}
+# change margins of plot
+par(mar=rep(1,4))
+# plot all the azimuths
+plot(azimuth$Dcirc, 
+     main="TUVU_7783 Direction",
+     stack=T, 
+     shrink=1.6,
+     pch=16, 
+     sep=0.05, 
+     col="grey")
+# loop through seasons and plot a line denisty per season
+for(i in 1:length(seasons)){
+  # subset the azimuth
+  x <- azimuth[azimuth$Season==seasons[i],'Dcirc']
+  # calculate density and plot as a line
+  lines(density(x, 
+                bw=180, 
+                kernel="vonmises"), 
+        lwd=2, 
+        lty=i)
+  # draw an arrow showing mean and resultant length
+  arrows.circular(mean(x), y=rho.circular(x), lwd=2, length=0.1, lty=i)
+}
+# add a legend
+legend("bottomleft", 
+       lty=c(1,2,3,4), 
+       seasons, 
+       bty="n", 
+       cex=0.85)
+
+```
+
+### Speed in relation to Direction
+
+-   Another helpful visualization is to view the speed in relation to direction and season.
+
+    -   It can be seen the 7783 moves faster during migration.
+
+```{r}
+# speed ~ azimuth scatter plot #
+library(scales)
+plot(speed(move_tuvu_7783_22)~angle(move_tuvu_7783_22),
+     main="TUVU_7783 Speed",
+     ylab="Speed in m/s", 
+     xlab="Azimuth in degrees", 
+     type="n", 
+     bty="n")
+points(speed(move_tuvu_7783_22)~angle(move_tuvu_7783_22), ylim=c(0,20),
+     ylab="Speed in m/s", 
+     xlab="Azimuth in degrees", 
+     pch=16, 
+     col=alpha("black", 0.3))
+
+
+# wind rose of azimuth and speed per season
+par(list(mfrow=c(2,2)))
+for(i in seasons){
+  windrose(x=azimuth[azimuth$Season==i,'Dcirc'], 
+           y=azimuth[azimuth$Season==i,'V'],
+           main= i, 
+           plot.mids=T, 
+           cir.ind = 0.2, 
+           mids.size=1, 
+           increment=5, 
+           bins=36, 
+           fill.col=grey(seq(1,0, length.out=6)),
+           shrink=1.2)
+}
+par(mfrow=c(1,1))
+```
+
+### Detailed Migration Map
+
+-   This is the same map created earlier with the colors representing the different seasons.
+
+```{r}
+#plot data
+ggmap(m, color=groups)+
+geom_path(data=tuvu_7783_22, 
+          aes(x=lon, 
+              y=lat,
+              color=groups),
+              size=0.7)+
+  theme(text = element_text(size =13),
+        panel.grid.major.x = element_blank() ,
+        panel.grid.minor.x = element_blank())+
+  labs(y = "Latitude", 
+       x = "Longitude")+
+  scale_color_manual(values = c("pink", "salmon", "turquoise4", "mediumorchid4"))
+```
+
+## Working With Altitude
+
+### Mutate Data to Fit Elevatr
+
+-   The *elevatr* package needs to have the "lon" and "lat" in the front of the data set.
+
+-   The *geosphere* package needs the to have only "lon" and "lat" in the data set.
+
+```{r}
+#upload package
+library(elevatr)
+#rearange data set to make readable for elevator function
+dat_tuvu_relocate<-tuvu_7783_22 |> 
+  relocate(lon, .before=id) |> 
+  relocate(lat, .before=id) |> 
+  relocate(DateTime, .before=id) |> 
+  relocate(DateTime, .before=id) |> 
+  drop_na(lat)
+
+#convert into Data.frame
+dat_tuvu_relocate_df <- data.frame(dat_tuvu_relocate)
+```
+
+### Download elevatr data
+
+-   elevatr will extract topographic data from AWS and create a raster. It then takes that raster and extracts the elevation of the land when given a specific coordinate.
+
+```{r}
+#get elevation points from coordinates
+dat_tuvu_with_ellip<- get_elev_point(dat_tuvu_relocate_df, 
+                                     prj = "+proj=longlat +datum=WGS84 +no_defs", 
+                                     src = "aws", 
+                                     z=5)
+
+#create all outputs available
+options(max.print = 1000000)
+
+glimpse(dat_tuvu_with_ellip)
+```
+
+### Calculate Elevation above Ground Level
+
+-   Subtract the elevation of the land from the altitude to obtain the elevation above ground level.
+
+```{r}
+#converting ellipsoidal heights to orthometric heights
+dat_tuvu_with_ellip$eagl<-dat_tuvu_with_ellip$alt-dat_tuvu_with_ellip$elevation
+
+#convert spacial data frame into normal data frame
+dat_tuvu_with_eagl<- as.data.frame(dat_tuvu_with_ellip)
+
+glimpse(dat_tuvu_with_eagl)
+```
+
+### Apply Filters
+
+-   hdop is the horizontal dilution of precision, and vdop is vertical dilution of precision
+
+    -   This tells us how accurate the data collected was based off the position and precision of satellites.
+
+    -   Acceptable values are anything below 3.
+
+-   Time to fix indicates the ammount of time taken to acquire a satellite signal, navigate, and calculate data.
+
+-   To visualize negative points filter out any altitude greater than 0.1 (only do to visualize negative do not include in final graph.
+
+```{r}
+#filter data with HDOP greater than 5
+dat_tuvu_with_eagl_f <- filter(dat_tuvu_with_eagl, hdop<5)
+
+#filter data with vDOP greater than 5
+dat_tuvu_with_eagl_f<- filter(dat_tuvu_with_eagl_f, vdop<5)
+
+glimpse(dat_tuvu_with_eagl_f)
+
+#filter out time to fix less greater than 60
+dat_tuvu_with_eagl_f<- filter(dat_tuvu_with_eagl_f, time_to_fix<60)
+
+glimpse(dat_tuvu_with_eagl_f)
+
+#remove negative points
+dat_tuvu_with_eagl_fp<- filter(dat_tuvu_with_eagl_f, eagl>(-0.1))
+#filter out on the ground
+dat_tuvu_with_eagl_fs<- filter(dat_tuvu_with_eagl_f, speed>1)
+
+#filter out negative points
+dat_tuvu_with_eagl_fn<- filter(dat_tuvu_with_eagl_f, eagl<(0))
+dat_tuvu_with_eagl_fsn<- filter(dat_tuvu_with_eagl_fs, eagl<(0))
+
+
+glimpse(dat_tuvu_with_eagl_f)
+
+```
+
+### Create ggplot Visuals
+
+```{r}
+
+library(patchwork)
+#histogram of all values
+p3<-ggplot(dat_tuvu_with_eagl_f, 
+           aes(x = eagl)) +
+  geom_histogram(fill="black",
+                 binwidth = 100, 
+                 size=1) +
+  ggtitle("TUVU EAGL (100m binwidth)")+
+  labs( x="Elevation Above Ground Level (m)")+
+  theme(text = element_text(size =18))
+
+#histogram of negative values
+ggplot(dat_tuvu_with_eagl_fn, aes(x = eagl)) +
+  geom_histogram(color="red", 
+                 fill="black",
+                 binwidth = 10, 
+                 size=1) +
+  ggtitle("TUVU EAGL negative points (10m binwidth)")+
+  theme(text = element_text(size =18))
+
+#histogram of when speed is filtered 
+p4<-ggplot(dat_tuvu_with_eagl_fs, 
+           aes(x = eagl)) +
+  geom_histogram(fill="black",
+                 binwidth = 100,
+                 size=1) +
+  ggtitle("TUVU EAGL with Speed Greater than 1 (100m binwidth)")+
+  labs( x="Elevation Above Ground Level (m)")+
+  theme(text = element_text(size =18))
+
+#histogram of negative points when speed is filtered
+ggplot(dat_tuvu_with_eagl_fsn, 
+       aes(x = eagl)) +
+  geom_histogram(color="red", 
+                 fill="black",
+                 binwidth = 10, 
+                 size=1) +
+  ggtitle("TUVU EAGL with Speed Greater than 1 negaitve points (10m binwidth)")+
+  theme(text = element_text(size =18))
+
+#use patchwork to combine them together
+p3/p4
+
+dat_tuvu_with_eagl_fp$DateAndTime <- as.Date(dat_tuvu_with_eagl_fp$DateTime, tz = "UTC", origin = '2021-03-29')
+
+#scatter plot of time vs altitude
+p1<-ggplot(dat_tuvu_with_eagl_fp, 
+           aes(x = DateAndTime, y = eagl)) +
+  geom_point()+
+  scale_x_date(date_breaks = "1 month", 
+               date_labels = "%y-%j")+
+  theme(axis.text.x = element_text(angle=90, 
+                                   vjust=.5, 
+                                   hjust=1), 
+        text = element_text(size =15), 
+        panel.grid.major.x = element_blank() ,
+        panel.grid.minor.x = element_blank())+
+  labs(title = "TUVU EAGL", 
+       y = "Elevation Above Ground Level (m)", 
+       x = "Time Stamp")
+
+tuvu_7783_22$DateAndTime <- as.Date(tuvu_7783_22$DateTime,
+                                 tz = "UTC", 
+                                 origin = '2022-01-01')
+
+#scatter plot of time vs altitude with raw data
+p2<-ggplot(tuvu_7783_22, aes(x = DateAndTime, y = alt)) +
+  geom_point()+
+  scale_x_date(date_breaks = "1 month", 
+               date_labels = "%y-%j")+
+  theme(axis.text.x = element_text(angle=90, 
+                                   vjust=.5, 
+                                   hjust=1), 
+        text = element_text(size =15), 
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank())+
+  labs(title = "TUVU Altitude No Filters", 
+       y = "Altitude (m)", 
+       x = "Time Stamp")
+
+#use patchwork to combine
+p2/p1
+```
